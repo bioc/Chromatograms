@@ -221,16 +221,18 @@ test_that("spectraSortIndex is set for unsorted data with multiple dataOrigins",
     cb <- ChromBackendSpectra()
     cb <- backendInitialize(cb, spectra = sp)
 
-    ## For unsorted data, spectraSortIndex should be set
+    ## For unsorted data, spectraSortIndex should be set. dataOrigin groups are
+    ## ordered by first appearance ("B" before "A"), then by rtime within group.
     expect_true(length(cb@spectraSortIndex) > 0)
-    expected_sort <- order(sp$dataOrigin, sp$rtime)
+    expected_sort <- order(factor(sp$dataOrigin, levels = unique(sp$dataOrigin)),
+                           sp$rtime)
     expect_identical(cb@spectraSortIndex, expected_sort)
 
     ## Verify sorting is correct
     sorted_do <- sp$dataOrigin[cb@spectraSortIndex]
     sorted_rt <- sp$rtime[cb@spectraSortIndex]
-    expect_identical(sorted_do, c("A", "A", "A", "B", "B", "B"))
-    expect_identical(sorted_rt, c(1, 2, 4, 3, 5, 6))
+    expect_identical(sorted_do, c("B", "B", "B", "A", "A", "A"))
+    expect_identical(sorted_rt, c(3, 5, 6, 1, 2, 4))
 })
 
 test_that("factorize() clears spectraSortIndex when data is sorted", {
@@ -329,6 +331,54 @@ test_that("peaksData works correctly with populated spectraSortIndex", {
     expect_true(all(sapply(pd, is.data.frame)))
 })
 
+test_that("peaksData aggregates overlapping different-rt windows correctly", {
+    ## Six spectra with ascending intensity on two m/z channels.
+    sp <- Spectra(DataFrame(
+        mz = NumericList(rep(list(c(100, 200)), 6), compress = FALSE),
+        intensity = NumericList(c(10, 5), c(20, 6), c(30, 7), c(40, 8),
+                                c(50, 9), c(60, 10), compress = FALSE),
+        rtime = as.numeric(1:6), msLevel = rep(1L, 6),
+        dataOrigin = rep("A", 6)))
+    ## Two m/z=100 windows overlapping at rt 3-4, plus one TIC window. This
+    ## exercises the spectrum-major path, where a spectrum shared by several
+    ## windows is aggregated once and fanned out.
+    pt <- data.frame(feature_id = c("f1", "f2", "f3"),
+                     mzMin = c(99, 99, -Inf), mzMax = c(101, 101, Inf),
+                     rtMin = c(1, 3, 1), rtMax = c(4, 6, 3),
+                     dataOrigin = "A", msLevel = 1L)
+    chr <- chromExtract(Chromatograms(sp), peak.table = pt,
+                        by = c("msLevel", "dataOrigin"))
+    pd <- peaksData(chr)
+    expect_equal(pd[[1]]$rtime, c(1, 2, 3, 4))
+    expect_equal(pd[[1]]$intensity, c(10, 20, 30, 40))
+    ## overlap: the shared spectra at rt 3-4 give f2 the same values as f1
+    expect_equal(pd[[2]]$rtime, c(3, 4, 5, 6))
+    expect_equal(pd[[2]]$intensity, c(30, 40, 50, 60))
+    ## TIC sums both channels
+    expect_equal(pd[[3]]$rtime, c(1, 2, 3))
+    expect_equal(pd[[3]]$intensity, c(15, 26, 37))
+})
+
+test_that("peaksData with different-rt windows is invariant to spectra order", {
+    sp <- Spectra(DataFrame(
+        mz = NumericList(rep(list(c(100, 200)), 6), compress = FALSE),
+        intensity = NumericList(c(10, 5), c(20, 6), c(30, 7), c(40, 8),
+                                c(50, 9), c(60, 10), compress = FALSE),
+        rtime = as.numeric(1:6), msLevel = rep(1L, 6),
+        dataOrigin = rep("A", 6)))
+    pt <- data.frame(feature_id = c("f1", "f2", "f3"),
+                     mzMin = c(99, 99, -Inf), mzMax = c(101, 101, Inf),
+                     rtMin = c(1, 3, 1), rtMax = c(4, 6, 3),
+                     dataOrigin = "A", msLevel = 1L)
+    sorted <- peaksData(chromExtract(Chromatograms(sp), peak.table = pt,
+                                     by = c("msLevel", "dataOrigin")))
+    ## Reordered input: the backend re-sorts, so peaksData must be unchanged.
+    shuffled <- peaksData(chromExtract(Chromatograms(sp[c(4, 1, 6, 2, 5, 3)]),
+                                       peak.table = pt,
+                                       by = c("msLevel", "dataOrigin")))
+    expect_equal(sorted, shuffled)
+})
+
 test_that("spectraSortIndex is set and used for sorting", {
     sp <- Spectra(DataFrame(
         mz = NumericList(c(1, 2), c(1, 2), c(1, 2), c(1, 2), compress = FALSE),
@@ -378,8 +428,9 @@ test_that("[ maintains spectra and spectraSortIndex", {
     # spectraSortIndex should be set since data is unsorted
     expect_true(length(cb@spectraSortIndex) > 0)
 
-    # Verify spectraSortIndex is correctly set
-    expected_sort <- order(sp$dataOrigin, sp$rtime)
+    # Verify spectraSortIndex is correctly set (groups by first appearance)
+    expected_sort <- order(factor(sp$dataOrigin, levels = unique(sp$dataOrigin)),
+                           sp$rtime)
     expect_identical(cb@spectraSortIndex, expected_sort)
 
     # Get chromSpectraIndex before subsetting

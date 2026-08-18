@@ -1,5 +1,25 @@
 # Version 1.3
 
+## Changes in 1.3.3
+
+- Major `ChromBackendSpectra` performance improvements: `chromExtract()`,
+  `Chromatograms(spectra)`, `peaksData()` and `[` no longer re-validate the
+  wrapped `Spectra` on every call (which re-stated every backing file), so they
+  no longer scale with the number of files.
+
+- Improve performance of `peaksData()` for `ChromBackendSpectra` with
+  overlapping chromatogram windows (e.g. from `chromExtract()`): each
+  spectrum is aggregated once and shared across the windows it falls in,
+  instead of once per window. Results are unchanged; the speed-up grows
+  with the number of overlapping windows.
+
+- Improve performance of `peakBoundary()`: valleys flanking the apex are
+  located by scanning outwards from it rather than scanning the whole
+  chromatogram. Results are unchanged.
+
+- Order `dataOrigin` by first appearance when computing the spectra sort index,
+  consistent with `backendParallelFactor()`.
+
 ## Changes in 1.3.2
 
 - Change `plotChromatograms()` and `plotChromatogramsOverlay()` to methods.
@@ -11,6 +31,7 @@
 
 - Fix `ChromBackendSpectra` `spectraSortIndex` test to shuffle spectra first,
   avoiding a spurious failure when input data is already sorted.
+  
 
 # Version 1.1
 
